@@ -10,7 +10,8 @@
   const DEFAULTS = {
     enabled: true,
     maxWords: 14, // wrap cap for an over-long sentence
-    fontSize: 30,
+    fontSize: 30, // old setting, migrated to fontScale
+    fontScale: 100,
     lead: 0.3,
   };
   let settings = { ...DEFAULTS };
@@ -23,6 +24,7 @@
   let overlayEl = null;
   let spanEl = null;
   let rafId = null;
+  let lastOverlayFontPx = null;
 
   let lastTracks = null;
   let lastVideoId = null;
@@ -37,8 +39,8 @@
 
   // ---------------------------------------------------------------- settings
 
-  chrome.storage.sync.get(DEFAULTS, (s) => {
-    applySettings(s, true);
+  chrome.storage.sync.get(null, (s) => {
+    applySettings(withStoredDefaults(s), true);
     watchCc(0); // start mirroring the CC button (reconciles enabled to it)
   });
 
@@ -69,9 +71,7 @@
     settings = { ...settings, ...patch };
 
     if (settings.maxWords !== prev.maxWords) rebuildLines();
-    if (overlayEl && settings.fontSize !== prev.fontSize) {
-      overlayEl.style.fontSize = settings.fontSize + "px";
-    }
+    if (settings.fontScale !== prev.fontScale) applyTextScale(getActivePlayer());
     if (forceEnabled || settings.enabled !== prev.enabled) applyEnabled();
   }
 
@@ -80,7 +80,11 @@
     if (!next || typeof next !== "object") return out;
     if ("enabled" in next) out.enabled = Boolean(next.enabled);
     if ("maxWords" in next) out.maxWords = clampInt(next.maxWords, DEFAULTS.maxWords, 2, 30);
-    if ("fontSize" in next) out.fontSize = clampInt(next.fontSize, DEFAULTS.fontSize, 12, 80);
+    if ("fontScale" in next) {
+      out.fontScale = clampInt(next.fontScale, DEFAULTS.fontScale, 50, 200);
+    } else if ("fontSize" in next && next.fontSize != null) {
+      out.fontScale = fontSizeToScale(next.fontSize);
+    }
     if ("lead" in next) out.lead = clampNumber(next.lead, DEFAULTS.lead, 0, 2);
     return out;
   }
@@ -92,6 +96,20 @@
   function clampNumber(value, fallback, min, max) {
     const n = parseFloat(value);
     return Math.max(min, Math.min(max, isNaN(n) ? fallback : n));
+  }
+
+  function fontSizeToScale(value) {
+    const px = clampInt(value, DEFAULTS.fontSize, 12, 80);
+    return Math.max(50, Math.min(200, Math.round((px / DEFAULTS.fontSize) * 100)));
+  }
+
+  function withStoredDefaults(stored) {
+    const raw = stored || {};
+    const out = { ...DEFAULTS, ...raw };
+    if (!Object.prototype.hasOwnProperty.call(raw, "fontScale") && Object.prototype.hasOwnProperty.call(raw, "fontSize")) {
+      delete out.fontScale;
+    }
+    return out;
   }
 
   // ------------------------------------------------ navigation / video state
@@ -642,12 +660,24 @@
 
     overlayEl = document.createElement("div");
     overlayEl.className = "ytfix-overlay";
-    overlayEl.style.fontSize = settings.fontSize + "px";
     spanEl = document.createElement("span");
     spanEl.className = "ytfix-text";
     overlayEl.appendChild(spanEl);
     player.appendChild(overlayEl);
+    applyTextScale(player);
     return overlayEl;
+  }
+
+  function applyTextScale(player) {
+    if (!overlayEl || !player) return;
+    const rect = player.getBoundingClientRect();
+    const playerHeight = rect.height || window.innerHeight || 720;
+    const scale = Math.max(50, Math.min(200, settings.fontScale || DEFAULTS.fontScale)) / 100;
+    const fontPx = Math.max(14, Math.min(96, playerHeight * 0.045 * scale));
+    const rounded = Math.round(fontPx * 10) / 10;
+    if (rounded === lastOverlayFontPx) return;
+    lastOverlayFontPx = rounded;
+    overlayEl.style.fontSize = rounded + "px";
   }
 
   function clearOverlayText() {
@@ -677,7 +707,9 @@
   function tick() {
     rafId = requestAnimationFrame(tick);
     const video = getVideoElement();
-    if (!video || !ensureOverlay(video)) return;
+    const overlay = video && ensureOverlay(video);
+    if (!video || !overlay) return;
+    applyTextScale(overlay.parentElement);
 
     let text = "";
     if (lines.length) {
@@ -703,6 +735,7 @@
     if (overlayEl && overlayEl.parentElement) overlayEl.parentElement.removeChild(overlayEl);
     overlayEl = null;
     spanEl = null;
+    lastOverlayFontPx = null;
   }
 
   function applyEnabled() {

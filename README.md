@@ -40,7 +40,9 @@ it when the video reaches that line's first word.
   ignoring abbreviations (`Mr.`, `e.g.`), decimals (`3.14`), and ellipses. A
   sentence longer than this wraps at the last comma/clause, or at this cap as a
   hard limit (default 14).
-- **Font size** — overlay text size in pixels.
+- **Text scale (%)** — subtitle size as a percentage of the player-relative
+  default. `100` matches the normal size; lower or higher values scale with the
+  active player in regular view, theater mode, fullscreen, Shorts, and embeds.
 - **Lead (sec)** — show each line this many seconds early so it's never late
   (default 0.3). Raise it if lines still feel delayed; set 0 for exact timing.
 

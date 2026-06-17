@@ -10,7 +10,6 @@
   const DEFAULTS = {
     enabled: true,
     maxWords: 14, // wrap cap for an over-long sentence
-    fontSize: 30, // old setting, migrated to fontScale
     fontScale: 100,
     lead: 0.3,
   };
@@ -39,8 +38,8 @@
 
   // ---------------------------------------------------------------- settings
 
-  chrome.storage.sync.get(null, (s) => {
-    applySettings(withStoredDefaults(s), true);
+  chrome.storage.sync.get(DEFAULTS, (s) => {
+    applySettings(s, true);
     watchCc(0); // start mirroring the CC button (reconciles enabled to it)
   });
 
@@ -82,8 +81,6 @@
     if ("maxWords" in next) out.maxWords = clampInt(next.maxWords, DEFAULTS.maxWords, 2, 30);
     if ("fontScale" in next) {
       out.fontScale = clampInt(next.fontScale, DEFAULTS.fontScale, 50, 200);
-    } else if ("fontSize" in next && next.fontSize != null) {
-      out.fontScale = fontSizeToScale(next.fontSize);
     }
     if ("lead" in next) out.lead = clampNumber(next.lead, DEFAULTS.lead, 0, 2);
     return out;
@@ -96,20 +93,6 @@
   function clampNumber(value, fallback, min, max) {
     const n = parseFloat(value);
     return Math.max(min, Math.min(max, isNaN(n) ? fallback : n));
-  }
-
-  function fontSizeToScale(value) {
-    const px = clampInt(value, DEFAULTS.fontSize, 12, 80);
-    return Math.max(50, Math.min(200, Math.round((px / DEFAULTS.fontSize) * 100)));
-  }
-
-  function withStoredDefaults(stored) {
-    const raw = stored || {};
-    const out = { ...DEFAULTS, ...raw };
-    if (!Object.prototype.hasOwnProperty.call(raw, "fontScale") && Object.prototype.hasOwnProperty.call(raw, "fontSize")) {
-      delete out.fontScale;
-    }
-    return out;
   }
 
   // ------------------------------------------------ navigation / video state
@@ -662,6 +645,7 @@
     overlayEl.className = "ytfix-overlay";
     spanEl = document.createElement("span");
     spanEl.className = "ytfix-text";
+    spanEl.style.display = "none";
     overlayEl.appendChild(spanEl);
     player.appendChild(overlayEl);
     applyTextScale(player);
@@ -671,13 +655,18 @@
   function applyTextScale(player) {
     if (!overlayEl || !player) return;
     const rect = player.getBoundingClientRect();
+    const playerWidth = rect.width || window.innerWidth || 1280;
     const playerHeight = rect.height || window.innerHeight || 720;
+    const isPortrait = playerHeight > playerWidth * 1.15;
+    const basePx = isPortrait
+      ? playerWidth * 0.07
+      : Math.min(playerHeight * 0.048, playerWidth * 0.027);
     const scale = Math.max(50, Math.min(200, settings.fontScale || DEFAULTS.fontScale)) / 100;
-    const fontPx = Math.max(14, Math.min(96, playerHeight * 0.045 * scale));
+    const fontPx = basePx * scale;
     const rounded = Math.round(fontPx * 10) / 10;
     if (rounded === lastOverlayFontPx) return;
     lastOverlayFontPx = rounded;
-    overlayEl.style.fontSize = rounded + "px";
+    overlayEl.style.setProperty("font-size", rounded + "px");
   }
 
   function clearOverlayText() {

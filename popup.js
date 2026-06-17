@@ -1,7 +1,6 @@
 const DEFAULTS = {
   enabled: true,
   maxWords: 14,
-  fontSize: 30,
   fontScale: 100,
   lead: 0.3,
 };
@@ -45,8 +44,8 @@ function refreshStatus() {
   });
 }
 
-chrome.storage.sync.get(null, (s) => {
-  currentSettings = normalizeSettings(withStoredDefaults(s));
+chrome.storage.sync.get(DEFAULTS, (s) => {
+  currentSettings = normalizeSettings(s);
   writeSettings(currentSettings);
   hydrated = true;
 });
@@ -71,25 +70,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 function normalizeSettings(settings) {
   const lead = parseFloat(settings.lead);
-  const fontScale =
-    "fontScale" in settings
-      ? settings.fontScale
-      : Math.round((clampInt(settings.fontSize, DEFAULTS.fontSize, 12, 80) / DEFAULTS.fontSize) * 100);
   return {
     enabled: Boolean(settings.enabled),
     maxWords: clampInt(settings.maxWords, DEFAULTS.maxWords, 2, 30),
-    fontScale: clampInt(fontScale, DEFAULTS.fontScale, 50, 200),
+    fontScale: clampInt(settings.fontScale, DEFAULTS.fontScale, 50, 200),
     lead: Math.max(0, Math.min(2, isNaN(lead) ? DEFAULTS.lead : lead)),
   };
-}
-
-function withStoredDefaults(stored) {
-  const raw = stored || {};
-  const out = { ...DEFAULTS, ...raw };
-  if (!Object.prototype.hasOwnProperty.call(raw, "fontScale") && Object.prototype.hasOwnProperty.call(raw, "fontSize")) {
-    delete out.fontScale;
-  }
-  return out;
 }
 
 function clampInt(value, fallback, min, max) {
@@ -131,7 +117,7 @@ function save(options = {}) {
   }
 
   currentSettings = readSettings();
-  chrome.storage.sync.set(currentSettings, () => chrome.storage.sync.remove("fontSize"));
+  chrome.storage.sync.set(currentSettings);
   notifyActiveTab(currentSettings);
 
   if (options.normalizeInputs) writeSettings(currentSettings);

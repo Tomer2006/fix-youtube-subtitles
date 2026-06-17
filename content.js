@@ -28,28 +28,137 @@
   let lastVideoId = null;
   let loadedVideoId = null; // which video's captions we've already parsed
   let fallbackVideo = null; // video we've already scheduled a fallback for
+  let fallbackTimerId = null;
+  let captionStateVersion = 0;
+  let lastLocationHref = location.href;
   let weTurnedCcOn = false; // so disabling can put CC back the way it was
 
   // ---------------------------------------------------------------- settings
 
   chrome.storage.sync.get(DEFAULTS, (s) => {
-    settings = { ...DEFAULTS, ...s };
-    applyEnabled();
+    applySettings(s, true);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync") return;
-    let needRebuild = false;
-    let needEnable = false;
+    const next = {};
     for (const key in changes) {
-      settings[key] = changes[key].newValue;
-      if (key === "maxWords") needRebuild = true;
-      if (key === "enabled") needEnable = true;
+      next[key] = changes[key].newValue;
     }
-    if (needRebuild) rebuildLines();
-    if (needEnable) applyEnabled();
-    if (overlayEl) overlayEl.style.fontSize = settings.fontSize + "px";
+    applySettings(next, false);
   });
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.type !== "YTFIX_SETTINGS") return;
+    applySettings(message.settings, false);
+    sendResponse({ ok: true });
+  });
+
+  function applySettings(next, forceEnabled) {
+    const patch = sanitizeSettings(next);
+    const prev = settings;
+    settings = { ...settings, ...patch };
+
+    if (settings.maxWords !== prev.maxWords) rebuildLines();
+    if (overlayEl && settings.fontSize !== prev.fontSize) {
+      overlayEl.style.fontSize = settings.fontSize + "px";
+    }
+    if (forceEnabled || settings.enabled !== prev.enabled) applyEnabled();
+  }
+
+  function sanitizeSettings(next) {
+    const out = {};
+    if (!next || typeof next !== "object") return out;
+    if ("enabled" in next) out.enabled = Boolean(next.enabled);
+    if ("maxWords" in next) out.maxWords = clampInt(next.maxWords, DEFAULTS.maxWords, 2, 30);
+    if ("fontSize" in next) out.fontSize = clampInt(next.fontSize, DEFAULTS.fontSize, 12, 80);
+    if ("lead" in next) out.lead = clampNumber(next.lead, DEFAULTS.lead, 0, 2);
+    return out;
+  }
+
+  function clampInt(value, fallback, min, max) {
+    return Math.max(min, Math.min(max, parseInt(value, 10) || fallback));
+  }
+
+  function clampNumber(value, fallback, min, max) {
+    const n = parseFloat(value);
+    return Math.max(min, Math.min(max, isNaN(n) ? fallback : n));
+  }
+
+  // ------------------------------------------------ navigation / video state
+
+  handleNavigation("initial");
+  document.addEventListener("yt-navigate-start", () => handleNavigation("start"));
+  document.addEventListener("yt-navigate-finish", () => handleNavigation("finish"));
+  document.addEventListener("yt-page-data-updated", () => handleNavigation("page-data"));
+  window.addEventListener("popstate", () => handleNavigation("popstate"));
+  window.addEventListener("hashchange", () => handleNavigation("hashchange"));
+  setInterval(() => handleNavigation("poll"), 600);
+
+  function handleNavigation(reason) {
+    const href = location.href;
+    const urlVideoId = getCurrentUrlVideoId();
+    const hrefChanged = href !== lastLocationHref;
+    if (hrefChanged) lastLocationHref = href;
+
+    if (urlVideoId !== lastVideoId && (hrefChanged || urlVideoId || lastVideoId)) {
+      resetCaptionState(urlVideoId);
+      if (settings.enabled && urlVideoId) {
+        setTimeout(() => ensureCaptionsOn(0), reason === "initial" ? 0 : 500);
+      }
+    }
+  }
+
+  function resetCaptionState(videoId) {
+    lastVideoId = videoId || null;
+    lastTracks = null;
+    loadedVideoId = null;
+    fallbackVideo = null;
+    captionStateVersion++;
+    words = [];
+    lines = [];
+    weTurnedCcOn = false;
+
+    if (fallbackTimerId != null) {
+      clearTimeout(fallbackTimerId);
+      fallbackTimerId = null;
+    }
+    clearOverlayText();
+  }
+
+  function syncActiveVideo(videoId) {
+    if (videoId && videoId !== lastVideoId) resetCaptionState(videoId);
+    else if (videoId) lastVideoId = videoId;
+  }
+
+  function getMessageVideoId(rawId) {
+    const urlVideoId = getCurrentUrlVideoId();
+    const messageVideoId = cleanVideoId(rawId);
+    if (urlVideoId && messageVideoId && messageVideoId !== urlVideoId) return false;
+    return messageVideoId || urlVideoId || null;
+  }
+
+  function getCurrentUrlVideoId() {
+    return videoIdFromUrl(location.href);
+  }
+
+  function videoIdFromUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      const watchId = cleanVideoId(u.searchParams.get("v"));
+      if (watchId) return watchId;
+      const pathMatch = u.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/);
+      return pathMatch ? cleanVideoId(pathMatch[1]) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function cleanVideoId(value) {
+    if (!value) return null;
+    const id = String(value).trim();
+    return /^[A-Za-z0-9_-]{6,}$/.test(id) ? id : null;
+  }
 
   // --------------------------------------------------- messages from page
 
@@ -59,15 +168,13 @@
     if (!d) return;
 
     if (d.type === "YTFIX_CAPTION_TRACKS") {
-      lastTracks = d.tracks;
-      if (d.videoId && d.videoId !== lastVideoId) {
-        lastVideoId = d.videoId;
-        loadedVideoId = null;
-        words = [];
-        lines = [];
-        weTurnedCcOn = false;
-      } else if (d.videoId) {
-        lastVideoId = d.videoId;
+      const videoId = getMessageVideoId(d.videoId);
+      if (videoId === false) return; // stale player response from the previous SPA route
+
+      syncActiveVideo(videoId);
+      lastTracks = Array.isArray(d.tracks) ? d.tracks : [];
+      if (!lastTracks.length) {
+        return;
       }
       if (settings.enabled) {
         ensureCaptionsOn(0);
@@ -77,13 +184,19 @@
     }
 
     if (d.type === "YTFIX_TIMEDTEXT") {
+      const videoId = getMessageVideoId(d.videoId || videoIdFromUrl(d.url || ""));
+      if (videoId === false) return; // stale caption response from the previous video
+
+      syncActiveVideo(videoId);
+      const stateVersion = captionStateVersion;
+
       // Always parse and keep the captions, even while disabled, so toggling
       // back on shows them instantly (YouTube won't re-send what it already sent).
       const w = parseTimedtext(d.body || "");
-      if (w.length) {
+      if (w.length && stateVersion === captionStateVersion) {
         words = w;
         rebuildLines();
-        loadedVideoId = lastVideoId;
+        loadedVideoId = videoId || lastVideoId;
       }
       return;
     }
@@ -95,7 +208,10 @@
   function ensureCaptionsOn(attempt) {
     if (!settings.enabled) return;
     if (!lastTracks || !lastTracks.length) return; // video has no captions
-    const btn = document.querySelector(".ytp-subtitles-button");
+    const player = getActivePlayer();
+    const btn =
+      (player && player.querySelector(".ytp-subtitles-button")) ||
+      document.querySelector(".ytp-subtitles-button");
     if (btn) {
       if (btn.getAttribute("aria-pressed") === "false") {
         btn.click();
@@ -109,7 +225,10 @@
   // Undo our auto-enable: if we switched CC on, switch it back off.
   function restoreCaptions() {
     if (!weTurnedCcOn) return;
-    const btn = document.querySelector(".ytp-subtitles-button");
+    const player = getActivePlayer();
+    const btn =
+      (player && player.querySelector(".ytp-subtitles-button")) ||
+      document.querySelector(".ytp-subtitles-button");
     if (btn && btn.getAttribute("aria-pressed") === "true") btn.click();
     weTurnedCcOn = false;
   }
@@ -343,14 +462,18 @@
   // If we never captured YouTube's own timedtext request, try fetching it
   // ourselves. This may fail (missing tokens) — that's fine, so stay quiet.
   function scheduleFallback() {
+    if (!lastVideoId || !lastTracks || !lastTracks.length) return;
     if (fallbackVideo === lastVideoId) return;
     fallbackVideo = lastVideoId;
-    setTimeout(() => {
-      if (settings.enabled && !words.length) directFetchFallback();
+    const stateVersion = captionStateVersion;
+    fallbackTimerId = setTimeout(() => {
+      fallbackTimerId = null;
+      if (stateVersion !== captionStateVersion) return;
+      if (settings.enabled && !words.length) directFetchFallback(stateVersion);
     }, 4000);
   }
 
-  async function directFetchFallback() {
+  async function directFetchFallback(stateVersion) {
     const track = pickTrack(lastTracks);
     if (!track || !track.baseUrl) return;
     const base = track.baseUrl.replace(/&amp;/g, "&");
@@ -360,11 +483,15 @@
     ];
     for (const u of urls) {
       try {
+        const urlVideoId = videoIdFromUrl(u);
+        if (urlVideoId && lastVideoId && urlVideoId !== lastVideoId) continue;
         const res = await fetch(u, { credentials: "include" });
+        if (stateVersion !== captionStateVersion) return;
         if (!res.ok) continue;
         const text = await res.text();
+        if (stateVersion !== captionStateVersion) return;
         const w = parseTimedtext(text);
-        if (w.length) {
+        if (w.length && stateVersion === captionStateVersion) {
           words = w;
           rebuildLines();
           loadedVideoId = lastVideoId;
@@ -390,10 +517,43 @@
 
   // ------------------------------------------------ overlay + sync
 
-  function ensureOverlay() {
-    const player = document.querySelector("#movie_player");
+  function getVideoElement() {
+    const videos = Array.from(document.querySelectorAll("video.html5-main-video, video"));
+    return (
+      videos.find((video) => isVisible(video) && !video.paused) ||
+      videos.find(isVisible) ||
+      videos[0] ||
+      null
+    );
+  }
+
+  function isVisible(el) {
+    const rect = el.getBoundingClientRect();
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.bottom > 0 &&
+      rect.right > 0 &&
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth
+    );
+  }
+
+  function getActivePlayer() {
+    const video = getVideoElement();
+    return getPlayerForVideo(video) || document.querySelector("#movie_player, .html5-video-player");
+  }
+
+  function getPlayerForVideo(video) {
+    return video && video.closest("#movie_player, .html5-video-player");
+  }
+
+  function ensureOverlay(video) {
+    const player =
+      getPlayerForVideo(video) || document.querySelector("#movie_player, .html5-video-player");
     if (!player) return null;
     if (overlayEl && overlayEl.parentElement === player) return overlayEl;
+    removeOverlay();
 
     overlayEl = document.createElement("div");
     overlayEl.className = "ytfix-overlay";
@@ -403,6 +563,12 @@
     overlayEl.appendChild(spanEl);
     player.appendChild(overlayEl);
     return overlayEl;
+  }
+
+  function clearOverlayText() {
+    if (!spanEl) return;
+    spanEl.textContent = "";
+    spanEl.style.display = "none";
   }
 
   // Largest line index whose start time is <= t (binary search).
@@ -425,8 +591,8 @@
 
   function tick() {
     rafId = requestAnimationFrame(tick);
-    const video = document.querySelector("video.html5-main-video, video");
-    if (!video || !ensureOverlay()) return;
+    const video = getVideoElement();
+    if (!video || !ensureOverlay(video)) return;
 
     let text = "";
     if (lines.length) {

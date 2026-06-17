@@ -8,12 +8,20 @@
 (function () {
   "use strict";
 
+  function videoIdFromUrl(url) {
+    try {
+      return new URL(url, location.href).searchParams.get("v") || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function postTracks(pr) {
     try {
       const r = pr && pr.captions && pr.captions.playerCaptionsTracklistRenderer;
-      const tracks = r && r.captionTracks;
+      const tracks = (r && r.captionTracks) || [];
       const videoId = pr && pr.videoDetails && pr.videoDetails.videoId;
-      if (tracks && tracks.length) {
+      if (videoId || tracks.length) {
         window.postMessage(
           {
             type: "YTFIX_CAPTION_TRACKS",
@@ -42,21 +50,41 @@
     try {
       if (!body || url === lastTimedtextUrl) return;
       lastTimedtextUrl = url;
-      window.postMessage({ type: "YTFIX_TIMEDTEXT", url: url, body: body }, "*");
+      window.postMessage(
+        {
+          type: "YTFIX_TIMEDTEXT",
+          videoId: videoIdFromUrl(url),
+          url: url,
+          body: body,
+        },
+        "*"
+      );
     } catch (e) {
       /* ignore */
     }
+  }
+
+  function postCurrentPlayerResponse() {
+    if (window.ytInitialPlayerResponse) postTracks(window.ytInitialPlayerResponse);
+  }
+
+  function postCurrentPlayerSoon() {
+    setTimeout(postCurrentPlayerResponse, 0);
+    setTimeout(postCurrentPlayerResponse, 250);
   }
 
   // 1) First page load embeds the player response in a global.
   let tries = 0;
   (function readInitial() {
     if (window.ytInitialPlayerResponse) {
-      postTracks(window.ytInitialPlayerResponse);
+      postCurrentPlayerResponse();
     } else if (tries++ < 50) {
       setTimeout(readInitial, 100);
     }
   })();
+
+  document.addEventListener("yt-navigate-finish", postCurrentPlayerSoon);
+  document.addEventListener("yt-page-data-updated", postCurrentPlayerSoon);
 
   // 2) Tap fetch for both player responses and timedtext responses.
   const origFetch = window.fetch;

@@ -40,7 +40,9 @@ whole next line replaces it when the video reaches that line's first word.
 - **Lead (sec)** — show each line this many seconds early so it's never late
   (default 0.3). Raise it if lines still feel delayed; set 0 for exact timing.
 
-After changing settings, reload the YouTube tab if you don't see the change.
+Settings apply to the active YouTube tab as you edit them. If you reload the
+extension itself from `chrome://extensions`, refresh any already-open YouTube
+tabs so Chrome injects the updated content script.
 
 ## Notes / known limits
 
@@ -49,5 +51,8 @@ After changing settings, reload the YouTube tab if you don't see the change.
   timing. (We can switch to true word-level timestamps later if you want.)
 - The extension only has data once captions are loaded. It auto-enables CC for
   you; if a video genuinely has no captions, there's nothing to show.
+- The extension watches YouTube's SPA navigation and resets caption state across
+  regular watch pages, Shorts, playlist video changes, and `www.youtube.com`
+  embeds.
 - The current line stays on screen until the next line begins (matching the
   intended behavior), so it can linger during long silent gaps.

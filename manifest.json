@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Fix YouTube Subtitles",
   "version": "0.1.0",
-  "description": "Replaces YouTube captions with clean lines that appear a whole line at a time.",
+  "description": "Cleaner, readable YouTube captions",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
   "icons": {

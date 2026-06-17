@@ -169,6 +169,35 @@
         box-shadow: 0 0 0 3px rgba(255, 78, 69, 0.22);
       }
 
+      /* ---- status ---- */
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 12px;
+        padding: 9px 11px;
+        border-radius: 9px;
+        font-size: 12.5px;
+        background: #181818;
+        border: 1px solid var(--card-border);
+        color: var(--text);
+      }
+      .status .dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: #888;
+      }
+      .status-ok .dot { background: #3fb950; }
+      .status-loading .dot { background: #58a6ff; }
+      .status-off .dot { background: #777; }
+      .status-warn .dot { background: #ffb300; }
+      .status-warn { color: #ffd98a; }
+      .status-error .dot { background: #ff5252; }
+      .status-error { color: #ffb4b4; }
+      .status-idle .dot { background: #777; }
+
       /* ---- hint ---- */
       .hint {
         margin-top: 14px;
@@ -190,6 +219,11 @@
         <h1>Fix YouTube Subtitles</h1>
         <div class="sub">Cleaner, readable YouTube captions</div>
       </div>
+    </div>
+
+    <div id="status" class="status status-idle">
+      <span class="dot"></span>
+      <span id="status-text">Checking…</span>
     </div>
 
     <div class="card">

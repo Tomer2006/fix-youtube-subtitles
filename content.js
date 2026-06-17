@@ -28,13 +28,16 @@
   let lastVideoId = null;
   let loadedVideoId = null; // which video's captions we've already parsed
   let fallbackVideo = null; // video we've already scheduled a fallback for
-  let weTurnedCcOn = false; // so disabling can put CC back the way it was
+  let lastError = ""; // last hard failure (parse/fetch), shown in the popup
+  let loadAttempted = false; // have we had a fair chance to load this video's captions
+  let toastVideo = null; // video we've already shown a problem notice for
 
   // ---------------------------------------------------------------- settings
 
   chrome.storage.sync.get(DEFAULTS, (s) => {
     settings = { ...DEFAULTS, ...s };
     applyEnabled();
+    watchCc(0); // start mirroring the CC button (reconciles enabled to it)
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -65,53 +68,101 @@
         loadedVideoId = null;
         words = [];
         lines = [];
-        weTurnedCcOn = false;
+        lastError = "";
+        loadAttempted = false;
       } else if (d.videoId) {
         lastVideoId = d.videoId;
       }
-      if (settings.enabled) {
-        ensureCaptionsOn(0);
-        scheduleFallback();
-      }
+      watchCc(0); // (re)attach to this video's CC button and reconcile state
+      if (settings.enabled) scheduleFallback();
       return;
     }
 
     if (d.type === "YTFIX_TIMEDTEXT") {
       // Always parse and keep the captions, even while disabled, so toggling
       // back on shows them instantly (YouTube won't re-send what it already sent).
-      const w = parseTimedtext(d.body || "");
+      let w = [];
+      try {
+        w = parseTimedtext(d.body || "");
+      } catch (err) {
+        lastError = String((err && err.message) || err);
+        console.error("[ytfix] failed to parse captions:", err);
+        if (settings.enabled && ccState() !== false) showToast("Couldn't read this video's captions.", "error");
+      }
       if (w.length) {
         words = w;
         rebuildLines();
         loadedVideoId = lastVideoId;
+        lastError = "";
       }
       return;
     }
   });
 
-  // ------------------------------------------------ auto-enable captions
+  // ---------------------------------------------------- status (for popup)
 
-  // Click YouTube's CC button so it loads captions (we hide its visuals via CSS).
-  function ensureCaptionsOn(attempt) {
-    if (!settings.enabled) return;
-    if (!lastTracks || !lastTracks.length) return; // video has no captions
-    const btn = document.querySelector(".ytp-subtitles-button");
-    if (btn) {
-      if (btn.getAttribute("aria-pressed") === "false") {
-        btn.click();
-        weTurnedCcOn = true;
-      }
-      return;
-    }
-    if ((attempt || 0) < 20) setTimeout(() => ensureCaptionsOn((attempt || 0) + 1), 500);
+  function getStatus() {
+    if (location.pathname !== "/watch") return { level: "idle", msg: "Open a YouTube video to use subtitles." };
+    if (lastError) return { level: "error", msg: "Error: " + lastError };
+    if (!settings.enabled || ccState() === false) return { level: "off", msg: "Off — turn on YouTube's CC button." };
+    if (lines.length) return { level: "ok", msg: "Working — showing " + lines.length + " lines." };
+    if (!lastTracks || !lastTracks.length) return { level: "warn", msg: "This video has no captions." };
+    if (loadAttempted) return { level: "error", msg: "Couldn't load this video's captions." };
+    return { level: "loading", msg: "Loading captions…" };
   }
 
-  // Undo our auto-enable: if we switched CC on, switch it back off.
-  function restoreCaptions() {
-    if (!weTurnedCcOn) return;
-    const btn = document.querySelector(".ytp-subtitles-button");
-    if (btn && btn.getAttribute("aria-pressed") === "true") btn.click();
-    weTurnedCcOn = false;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg && msg.type === "YTFIX_GET_STATUS") sendResponse(getStatus());
+  });
+
+  // -------------------------------------- two-way sync with the CC button
+  //
+  // The extension's on/off and YouTube's CC button are kept equal. Every
+  // action only fires on a *mismatch* and moves toward agreement, so the two
+  // settle without looping: turning CC on/off flips the extension, and the
+  // popup toggle flips CC.
+
+  function ccButton() {
+    return document.querySelector(".ytp-subtitles-button");
+  }
+
+  function ccState() {
+    const b = ccButton();
+    if (!b) return null;
+    const p = b.getAttribute("aria-pressed");
+    return p === "true" ? true : p === "false" ? false : null;
+  }
+
+  // Make YouTube's CC button match our enabled flag (click only on mismatch).
+  function syncToCc() {
+    const on = ccState();
+    if (on === null || on === settings.enabled) return;
+    ccButton().click();
+  }
+
+  // CC button changed (or first seen): mirror its state into our enabled flag.
+  function onCcChanged() {
+    const on = ccState();
+    if (on === null || on === settings.enabled) return;
+    settings.enabled = on;
+    chrome.storage.sync.set({ enabled: on }); // updates popup + runs applyEnabled
+  }
+
+  let ccObserver = null;
+  let ccObserved = null;
+  function watchCc(attempt) {
+    const b = ccButton();
+    if (!b) {
+      if ((attempt || 0) < 40) setTimeout(() => watchCc((attempt || 0) + 1), 500);
+      return;
+    }
+    if (ccObserved !== b) {
+      if (ccObserver) ccObserver.disconnect();
+      ccObserved = b;
+      ccObserver = new MutationObserver(onCcChanged);
+      ccObserver.observe(b, { attributes: true, attributeFilter: ["aria-pressed"] });
+    }
+    onCcChanged(); // reconcile right now
   }
 
   // ------------------------------------------------ caption parsing
@@ -345,9 +396,37 @@
   function scheduleFallback() {
     if (fallbackVideo === lastVideoId) return;
     fallbackVideo = lastVideoId;
-    setTimeout(() => {
-      if (settings.enabled && !words.length) directFetchFallback();
+    setTimeout(async () => {
+      if (settings.enabled && !words.length) await directFetchFallback();
+      loadAttempted = true;
+      maybeProblemToast();
     }, 4000);
+  }
+
+  // After we've had a fair chance to load, tell the user on-screen if nothing came.
+  function maybeProblemToast() {
+    if (!settings.enabled || ccState() === false || lines.length) return;
+    if (toastVideo === lastVideoId) return;
+    toastVideo = lastVideoId;
+    if (!lastTracks || !lastTracks.length) showToast("This video has no captions to show.", "warn");
+    else showToast("Couldn't load subtitles for this video.", "error");
+  }
+
+  // Brief notice shown over the player.
+  function showToast(msg, level) {
+    const player = document.querySelector("#movie_player");
+    if (!player) return;
+    let t = player.querySelector(".ytfix-toast");
+    if (!t) {
+      t = document.createElement("div");
+      t.className = "ytfix-toast";
+      player.appendChild(t);
+    }
+    t.textContent = "Fix YouTube Subtitles: " + msg;
+    t.setAttribute("data-level", level || "info");
+    t.classList.add("ytfix-toast-show");
+    clearTimeout(t._hide);
+    t._hide = setTimeout(() => t.classList.remove("ytfix-toast-show"), 5000);
   }
 
   async function directFetchFallback() {
@@ -458,18 +537,17 @@
     if (settings.enabled) {
       document.documentElement.setAttribute("data-ytfix", "on");
       startLoop(); // renders stored captions immediately if we already have them
-      ensureCaptionsOn(0);
       scheduleFallback();
     } else {
       document.documentElement.setAttribute("data-ytfix", "off");
       stopLoop();
       removeOverlay();
-      restoreCaptions();
     }
+    syncToCc(); // keep YouTube's CC button matching our state
   }
 
-  // Re-check captions after SPA navigations.
+  // Re-attach to the CC button after SPA navigations (it gets recreated).
   document.addEventListener("yt-navigate-finish", () => {
-    if (settings.enabled) setTimeout(() => ensureCaptionsOn(0), 800);
+    setTimeout(() => watchCc(0), 800);
   });
 })();

@@ -28,3 +28,33 @@ html[data-ytfix="on"] .caption-window {
   white-space: pre-wrap;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
 }
+
+/* On-screen problem notice */
+.ytfix-toast {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  max-width: 80%;
+  z-index: 70;
+  pointer-events: none;
+  font-family: "YouTube Noto", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(20, 20, 20, 0.92);
+  border: 1px solid #3a3a3a;
+  border-left: 4px solid #ffb300;
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+}
+.ytfix-toast[data-level="error"] {
+  border-left-color: #ff5252;
+}
+.ytfix-toast.ytfix-toast-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

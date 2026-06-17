@@ -1,0 +1,30 @@
+/* Hide YouTube's own captions only while the extension is on. */
+html[data-ytfix="on"] .ytp-caption-window-container,
+html[data-ytfix="on"] .caption-window {
+  display: none !important;
+}
+
+/* Our replacement overlay, anchored inside the player so it survives fullscreen. */
+.ytfix-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 9%;
+  transform: translateX(-50%);
+  max-width: 92%;
+  text-align: center;
+  z-index: 25;
+  pointer-events: none;
+  font-family: "YouTube Noto", Roboto, Arial, sans-serif;
+  line-height: 1.35;
+}
+
+.ytfix-overlay .ytfix-text {
+  display: inline-block;
+  color: #fff;
+  background: rgba(8, 8, 8, 0.78);
+  padding: 0.15em 0.5em;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: pre-wrap;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}

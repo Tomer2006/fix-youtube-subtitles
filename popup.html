@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-1: #161616;
+        --bg-2: #0e0e0e;
+        --card: #1c1c1c;
+        --card-border: #2c2c2c;
+        --row-divider: #262626;
+        --field-bg: #141414;
+        --field-border: #343434;
+        --text: #f1f1f1;
+        --text-dim: #9a9a9a;
+        --accent: #ff4e45;
+        --accent-2: #b3001b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        width: 296px;
+        margin: 0;
+        padding: 18px 16px 16px;
+        background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+        color: var(--text);
+        font-family: "Segoe UI", Roboto, -apple-system, Arial, sans-serif;
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---- header ---- */
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        margin-bottom: 16px;
+      }
+      .logo {
+        width: 36px;
+        height: 36px;
+        flex: 0 0 auto;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        color: #fff;
+        box-shadow: 0 5px 14px rgba(255, 78, 69, 0.35);
+      }
+      .header h1 {
+        font-size: 15px;
+        font-weight: 700;
+        margin: 0;
+        line-height: 1.1;
+      }
+      .header .sub {
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-top: 3px;
+      }
+
+      /* ---- card + rows ---- */
+      .card {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        border-radius: 13px;
+        padding: 2px 14px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--row-divider);
+      }
+      .row:last-child {
+        border-bottom: none;
+      }
+      .row label {
+        font-size: 13px;
+        color: #e9e9e9;
+        font-weight: 500;
+      }
+
+      /* ---- toggle switch ---- */
+      input#enabled {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        width: 46px;
+        height: 26px;
+        margin: 0;
+        border-radius: 999px;
+        background: #3a3a3a;
+        border: 1px solid #4a4a4a;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s;
+      }
+      input#enabled::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: #fff;
+        transform: translateY(-50%);
+        transition: left 0.2s;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      }
+      input#enabled:checked {
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        border-color: transparent;
+      }
+      input#enabled:checked::before {
+        left: 23px;
+      }
+
+      /* ---- selects + number fields ---- */
+      select,
+      input[type="number"] {
+        appearance: none;
+        -webkit-appearance: none;
+        background: var(--field-bg);
+        color: var(--text);
+        border: 1px solid var(--field-border);
+        border-radius: 9px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-family: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        outline: none;
+      }
+      input[type="number"] {
+        width: 78px;
+        text-align: center;
+      }
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      select {
+        width: 158px;
+        padding-right: 30px;
+        cursor: pointer;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='7' viewBox='0 0 12 7'><path d='M1 1l5 5 5-5' fill='none' stroke='%23aaaaaa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 11px center;
+      }
+      select:hover,
+      input[type="number"]:hover {
+        border-color: #4d4d4d;
+      }
+      select:focus,
+      input[type="number"]:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(255, 78, 69, 0.22);
+      }
+
+      /* ---- hint ---- */
+      .hint {
+        margin-top: 14px;
+        font-size: 11.5px;
+        color: var(--text-dim);
+        line-height: 1.55;
+        background: #181818;
+        border: 1px solid var(--card-border);
+        border-left: 3px solid var(--accent);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="logo">CC</div>
+      <div>
+        <h1>Fix YouTube Subtitles</h1>
+        <div class="sub">Cleaner, readable YouTube captions</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label for="enabled">Enabled</label>
+        <input type="checkbox" id="enabled" />
+      </div>
+
+      <div class="row">
+        <label for="maxWords" title="Wrap a sentence longer than this many words">Max words / line</label>
+        <input type="number" id="maxWords" min="2" max="30" />
+      </div>
+
+      <div class="row">
+        <label for="fontSize">Font size (px)</label>
+        <input type="number" id="fontSize" min="12" max="80" />
+      </div>
+
+      <div class="row">
+        <label for="lead" title="Show each line this many seconds early">Lead (sec)</label>
+        <input type="number" id="lead" min="0" max="2" step="0.1" />
+      </div>
+    </div>
+
+    <div class="hint">
+      <strong>Lead</strong> shows each line slightly early so it's never late. Raise it if
+      lines still feel delayed; set 0 for exact timing. Reload the YouTube tab if a change
+      doesn't show.
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

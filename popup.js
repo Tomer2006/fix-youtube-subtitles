@@ -9,18 +9,54 @@ const enabledEl = document.getElementById("enabled");
 const maxEl = document.getElementById("maxWords");
 const fontEl = document.getElementById("fontSize");
 const leadEl = document.getElementById("lead");
+const statusEl = document.getElementById("status");
+const statusText = document.getElementById("status-text");
 
 let currentSettings = { ...DEFAULTS };
 let hydrated = false;
 let saveTimer = null;
 
+function setStatus(level, msg) {
+  statusEl.className = "status status-" + level;
+  statusText.textContent = msg;
+}
+
+function withActiveTab(callback) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tabId = tabs && tabs[0] && tabs[0].id;
+    callback(tabId == null ? null : tabId);
+  });
+}
+
+function refreshStatus() {
+  withActiveTab((tabId) => {
+    if (tabId == null) {
+      setStatus("idle", "No active tab.");
+      return;
+    }
+    chrome.tabs.sendMessage(tabId, { type: "YTFIX_GET_STATUS" }, (resp) => {
+      if (chrome.runtime.lastError || !resp) {
+        setStatus("idle", "Open a YouTube video, then reopen this popup.");
+        return;
+      }
+      setStatus(resp.level, resp.msg);
+    });
+  });
+}
+
 chrome.storage.sync.get(DEFAULTS, (s) => {
   currentSettings = normalizeSettings(s);
-  enabledEl.checked = currentSettings.enabled;
-  maxEl.value = currentSettings.maxWords;
-  fontEl.value = currentSettings.fontSize;
-  leadEl.value = currentSettings.lead;
+  writeSettings(currentSettings);
   hydrated = true;
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !hydrated) return;
+  if (changes.enabled) {
+    currentSettings.enabled = Boolean(changes.enabled.newValue);
+    enabledEl.checked = currentSettings.enabled;
+    refreshStatus();
+  }
 });
 
 function normalizeSettings(settings) {
@@ -54,12 +90,12 @@ function writeSettings(settings) {
 }
 
 function notifyActiveTab(settings) {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const tabId = tabs && tabs[0] && tabs[0].id;
-    if (!tabId) return;
+  withActiveTab((tabId) => {
+    if (tabId == null) return;
     chrome.tabs.sendMessage(tabId, { type: "YTFIX_SETTINGS", settings }, () => {
       // Ignore tabs where the content script is not present.
       void chrome.runtime.lastError;
+      refreshStatus();
     });
   });
 }
@@ -83,6 +119,9 @@ function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 120);
 }
+
+refreshStatus();
+setInterval(refreshStatus, 1500);
 
 enabledEl.addEventListener("change", () => save());
 maxEl.addEventListener("input", scheduleSave);

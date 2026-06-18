@@ -24,6 +24,9 @@
   let spanEl = null;
   let rafId = null;
   let lastOverlayFontPx = null;
+  let activeVideoEl = null;
+  let activePlayerEl = null;
+  let playerResizeObserver = null;
 
   let lastTracks = null;
   let lastVideoId = null;
@@ -102,12 +105,14 @@
   document.addEventListener("yt-navigate-start", () => handleNavigation("start"));
   document.addEventListener("yt-navigate-finish", () => handleNavigation("finish"));
   document.addEventListener("yt-page-data-updated", () => handleNavigation("page-data"));
+  document.addEventListener("play", onVideoPlay, true);
   window.addEventListener("popstate", () => handleNavigation("popstate"));
   window.addEventListener("hashchange", () => handleNavigation("hashchange"));
   const navigationPollId = setInterval(() => handleNavigation("poll"), 600);
 
   function handleNavigation(reason) {
     if (!extensionContextAlive) return;
+    refreshActiveMedia();
     const href = location.href;
     const urlVideoId = getCurrentUrlVideoId();
     const hrefChanged = href !== lastLocationHref;
@@ -117,6 +122,11 @@
       resetCaptionState(urlVideoId);
       if (urlVideoId) setTimeout(() => watchCc(0), reason === "initial" ? 0 : 500);
     }
+  }
+
+  function onVideoPlay(event) {
+    const video = event.target;
+    if (video instanceof HTMLVideoElement) refreshActiveMedia(video);
   }
 
   function resetCaptionState(videoId) {
@@ -290,8 +300,13 @@
     if (ccObserver) ccObserver.disconnect();
     ccObserver = null;
     ccObserved = null;
+    document.removeEventListener("play", onVideoPlay, true);
+    if (playerResizeObserver) playerResizeObserver.disconnect();
+    playerResizeObserver = null;
     stopLoop();
     removeOverlay();
+    activeVideoEl = null;
+    activePlayerEl = null;
     document.documentElement.setAttribute("data-ytfix", "off");
   }
 
@@ -643,7 +658,7 @@
 
   // ------------------------------------------------ overlay + sync
 
-  function getVideoElement() {
+  function findActiveVideo() {
     const videos = Array.from(document.querySelectorAll("video.html5-main-video, video"));
     return (
       videos.find((video) => isVisible(video) && !video.paused) ||
@@ -651,6 +666,37 @@
       videos[0] ||
       null
     );
+  }
+
+  function refreshActiveMedia(preferredVideo) {
+    if (!extensionContextAlive) return null;
+
+    let video = preferredVideo && preferredVideo.isConnected ? preferredVideo : null;
+    if (!video && activeVideoEl && activeVideoEl.isConnected) video = activeVideoEl;
+
+    let player = getPlayerForVideo(video);
+    if (!video || !player) {
+      video = findActiveVideo();
+      player = getPlayerForVideo(video) || document.querySelector("#movie_player, .html5-video-player");
+    }
+
+    if (video === activeVideoEl && player === activePlayerEl) return video;
+
+    if (playerResizeObserver) playerResizeObserver.disconnect();
+    playerResizeObserver = null;
+    if (overlayEl && overlayEl.parentElement !== player) removeOverlay();
+
+    activeVideoEl = video;
+    activePlayerEl = player;
+
+    if (activePlayerEl) {
+      playerResizeObserver = new ResizeObserver(() => {
+        if (extensionContextAlive && activePlayerEl) applyTextScale(activePlayerEl);
+      });
+      playerResizeObserver.observe(activePlayerEl);
+    }
+
+    return activeVideoEl;
   }
 
   function isVisible(el) {
@@ -666,17 +712,17 @@
   }
 
   function getActivePlayer() {
-    const video = getVideoElement();
-    return getPlayerForVideo(video) || document.querySelector("#movie_player, .html5-video-player");
+    if (activePlayerEl && activePlayerEl.isConnected) return activePlayerEl;
+    refreshActiveMedia();
+    return activePlayerEl;
   }
 
   function getPlayerForVideo(video) {
     return video && video.closest("#movie_player, .html5-video-player");
   }
 
-  function ensureOverlay(video) {
-    const player =
-      getPlayerForVideo(video) || document.querySelector("#movie_player, .html5-video-player");
+  function ensureOverlay() {
+    const player = activePlayerEl;
     if (!player) return null;
     if (overlayEl && overlayEl.parentElement === player) return overlayEl;
     removeOverlay();
@@ -735,10 +781,10 @@
 
   function tick() {
     rafId = requestAnimationFrame(tick);
-    const video = getVideoElement();
-    const overlay = video && ensureOverlay(video);
-    if (!video || !overlay) return;
-    applyTextScale(overlay.parentElement);
+    const video = activeVideoEl;
+    if (!video || !activePlayerEl || !video.isConnected || !activePlayerEl.isConnected) return;
+    const overlay = ensureOverlay();
+    if (!overlay) return;
 
     let text = "";
     if (lines.length) {

@@ -8,7 +8,7 @@ html[data-ytfix="on"] .caption-window {
 .ytfix-overlay {
   position: absolute;
   left: 50%;
-  bottom: 9%;
+  bottom: 12%;
   transform: translateX(-50%);
   max-width: 92%;
   text-align: center;

@@ -35,6 +35,7 @@
   let lastError = ""; // last hard failure (parse/fetch), shown in the popup
   let loadAttempted = false; // have we had a fair chance to load this video's captions
   let toastVideo = null; // video we've already shown a problem notice for
+  let extensionContextAlive = true;
 
   // ---------------------------------------------------------------- settings
 
@@ -103,9 +104,10 @@
   document.addEventListener("yt-page-data-updated", () => handleNavigation("page-data"));
   window.addEventListener("popstate", () => handleNavigation("popstate"));
   window.addEventListener("hashchange", () => handleNavigation("hashchange"));
-  setInterval(() => handleNavigation("poll"), 600);
+  const navigationPollId = setInterval(() => handleNavigation("poll"), 600);
 
   function handleNavigation(reason) {
+    if (!extensionContextAlive) return;
     const href = location.href;
     const urlVideoId = getCurrentUrlVideoId();
     const hrefChanged = href !== lastLocationHref;
@@ -173,6 +175,7 @@
   // --------------------------------------------------- messages from page
 
   window.addEventListener("message", (e) => {
+    if (!extensionContextAlive) return;
     if (e.source !== window) return;
     const d = e.data;
     if (!d) return;
@@ -270,12 +273,49 @@
     const on = ccState();
     if (on === null || on === settings.enabled) return;
     applySettings({ enabled: on }, false);
-    chrome.storage.sync.set({ enabled: on }); // updates popup + runs applyEnabled
+    saveEnabled(on); // updates popup + runs applyEnabled
   }
 
   let ccObserver = null;
   let ccObserved = null;
+
+  function disposeStaleContext() {
+    if (!extensionContextAlive) return;
+    extensionContextAlive = false;
+    clearInterval(navigationPollId);
+    if (fallbackTimerId != null) {
+      clearTimeout(fallbackTimerId);
+      fallbackTimerId = null;
+    }
+    if (ccObserver) ccObserver.disconnect();
+    ccObserver = null;
+    ccObserved = null;
+    stopLoop();
+    removeOverlay();
+    document.documentElement.setAttribute("data-ytfix", "off");
+  }
+
+  function saveEnabled(enabled) {
+    if (!extensionContextAlive) return;
+    try {
+      if (!chrome.runtime.id) {
+        disposeStaleContext();
+        return;
+      }
+      chrome.storage.sync.set({ enabled }, () => {
+        try {
+          void chrome.runtime.lastError;
+        } catch (e) {
+          disposeStaleContext();
+        }
+      });
+    } catch (e) {
+      disposeStaleContext();
+    }
+  }
+
   function watchCc(attempt) {
+    if (!extensionContextAlive) return;
     const b = ccButton();
     if (!b) {
       if ((attempt || 0) < 40) setTimeout(() => watchCc((attempt || 0) + 1), 500);
